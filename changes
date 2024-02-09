@@ -1,0 +1,764 @@
+[0;1mdiff -r 6e99c96e0a56 lab4/check.ml[0m
+[0;31;1m--- a/lab4/check.ml	Thu Nov 02 18:58:50 2023 +0000[0m
+[0;32;1m+++ b/lab4/check.ml	Sat Jan 20 21:02:17 2024 +0000[0m
+[0;35m@@ -90,7 +90,7 @@[0m
+ (* |has_value| -- check if object is suitable for use in expressions *)
+ let has_value d = 
+   match d.d_kind with
+[0;31m-      ConstDef _ | VarDef | CParamDef | VParamDef | StringDef -> true[0m[0;1;41m [0m
+[0;32m+      ConstDef _ | VarDef | CParamDef | VParamDef | StringDef | OpenArrayParamDef -> true[0m[0;1;41m [0m
+     | _ -> false
+ 
+ (* |check_var| -- check that expression denotes a variable *)
+[0;35m@@ -100,16 +100,22 @@[0m
+         let d = get_def x in
+         begin
+           match d.d_kind with 
+[0;31m-              VarDef | VParamDef | CParamDef ->[0m
+[0;32m+              VarDef | VParamDef | CParamDef | OpenArrayParamDef ->[0m
+                 d.d_mem <- d.d_mem || addressible
+             | _ -> 
+                 sem_error "$ is not a variable" [fId x.x_name]
+         end
+     | Sub (a, i) -> check_var a addressible
+[0;32m+    | Slice (a,i,j) -> check_var a addressible[0m
+     | Select (r, x) -> check_var r addressible
+     | Deref p -> ()
+     | _ -> sem_error "a variable is needed here" []
+ 
+[0;32m+let get_value e =[0m
+[0;32m+  match e.e_value with[0m
+[0;32m+      Some v -> v[0m
+[0;32m+    | None -> failwith "get_value"[0m
+[0;32m+[0m
+ (* |check_expr| -- check and annotate an expression, return its type *)
+ let rec check_expr e env =
+   let t = expr_type e env in
+[0;35m@@ -138,8 +144,21 @@[0m
+         begin
+           match t1.t_guts with
+               ArrayType (upb, u1) -> u1
+[0;32m+            | OpenArrayType t1 -> t1[0m
+             | _ -> sem_error "subscripting a non-array" []
+         end
+[0;32m+    | Slice (e1,e2,e3) ->[0m[0;1;41m [0m
+[0;32m+        let t1 = check_expr e1 env[0m[0;1;41m [0m
+[0;32m+        and t2 = check_expr e2 env[0m[0;1;41m [0m
+[0;32m+        and t3 = check_expr e3 env in[0m
+[0;32m+        if not (same_type t2 integer && same_type t3 integer) then[0m
+[0;32m+            sem_error "subscripts must be integers for slice" [];[0m
+[0;32m+        begin[0m
+[0;32m+            match t1.t_guts with[0m
+[0;32m+                ArrayType(upb,u1) -> t1[0m
+[0;32m+              | OpenArrayType u1 -> t1[0m
+[0;32m+              | _ -> sem_error "subscripting a non-array" [];[0m
+[0;32m+        end[0m[0;1;41m [0m
+     | Select (e1, x) ->
+         let t1 = check_expr e1 env in
+         err_line := x.x_line;
+[0;35m@@ -202,8 +221,16 @@[0m
+         let t1 = check_expr arg env in
+         if not (same_type formal.d_type t1) then
+           sem_error "argument has wrong type" [];
+[0;31m-        if formal.d_kind = VParamDef then[0m[0;1;41m [0m
+[0;31m-          check_var arg true[0m
+[0;32m+[0m
+[0;32m+        begin[0m
+[0;32m+              match arg.e_guts with[0m
+[0;32m+                                    Slice(a,b,c) -> sem_error "Slice can only be passed to function expecting open array" [];[0m
+[0;32m+                                  |_ ->[0m
+[0;32m+                                        if formal.d_kind = VParamDef then[0m[0;1;41m [0m
+[0;32m+                                          check_var arg true[0m
+[0;32m+        end[0m
+[0;32m+[0m
+[0;32m+[0m[0;1;41m        [0m
+     | PParamDef ->
+         let pf = get_proc formal.d_type in
+         let x = (match arg.e_guts with Variable x -> x 
+[0;35m@@ -220,6 +247,11 @@[0m
+             | _ -> 
+                 sem_error "argument $ is not a procedure" [fId x.x_name]
+         end
+[0;32m+    | OpenArrayParamDef ->[0m[0;1;41m [0m
+[0;32m+      let t1 = check_expr arg env in[0m
+[0;32m+      if not (same_type formal.d_type t1) then[0m
+[0;32m+        sem_error "bad arg!!" [];[0m
+[0;32m+      check_var arg true[0m
+     | _ -> failwith "bad formal"
+ 
+ (* |check_libcall| -- check call to a library procedure *)
+[0;35m@@ -253,6 +285,19 @@[0m
+         if not (is_pointer t1) then 
+           sem_error "parameter of new must be a pointer" [];
+         check_var e1 false
+[0;32m+    | (NewRowProc, [e1;arrLength]) ->[0m
+[0;32m+      let t1 = check_expr e1 env in[0m
+[0;32m+      if not (is_pointer t1) then[0m
+[0;32m+        sem_error "first parameter of newrow must be a pointer" [];[0m
+[0;32m+      begin[0m
+[0;32m+        match (base_type t1).t_guts with[0m
+[0;32m+          OpenArrayType t ->[0m[0;1;41m [0m
+[0;32m+                        let t2 = check_expr arrLength env in[0m
+[0;32m+                        if not (same_type t2 integer) then[0m
+[0;32m+                          sem_error "second parameter of newrow must be an integer" [];[0m
+[0;32m+                        check_var e1 false[0m
+[0;32m+          | _ -> sem_error "pointer must point to an open array to use newrow" [][0m
+[0;32m+      end[0m
+     | (ArgvProc, [e1; e2]) ->
+         let t1 = check_expr e1 env
+         and t2 = check_expr e2 env in
+[0;35m@@ -263,6 +308,10 @@[0m
+         let t1 = check_expr e1 env in
+         if not (is_string t1) then
+           sem_error "parameter of open_in is not a string" []
+[0;32m+    | (Len, [e]) ->[0m
+[0;32m+      let t1 = check_expr e env in[0m
+[0;32m+      if not(is_array t1 || is_openArray t1) then[0m
+[0;32m+        sem_error "parameter of len is not an array" [][0m
+     | _ -> ()
+ 
+ (* |check_const| -- check an expression with constant value *)
+[0;35m@@ -416,7 +465,7 @@[0m
+ let param_size d =
+   match d.d_kind with
+       CParamDef | VParamDef -> 1
+[0;31m-    | PParamDef -> 2[0m
+[0;32m+    | PParamDef | OpenArrayParamDef -> 2[0m
+     | _ -> failwith "param_size"
+ 
+ (* param_alloc -- allocate space for formal parameters *)
+[0;35m@@ -434,7 +483,7 @@[0m
+ let do_alloc alloc ds =
+   let h d =
+     match d.d_kind with
+[0;31m-        VarDef | CParamDef | VParamDef | FieldDef | PParamDef ->[0m
+[0;32m+        VarDef | CParamDef | VParamDef | FieldDef | PParamDef | OpenArrayParamDef ->[0m
+           alloc d
+       | _ -> () in
+   List.iter h ds
+[0;35m@@ -458,6 +507,8 @@[0m
+         and t2 = check_typexpr value env in
+         if not (same_type t1 integer) then
+           sem_error "upper bound must be an integer" [];
+[0;32m+        if (is_openArray t2) then[0m
+[0;32m+          sem_error "array can't contain open arrays" [];[0m
+         row v1 t2
+     | Record fields ->
+         let env' = check_decls fields (new_block env) in
+[0;35m@@ -480,6 +531,13 @@[0m
+                 end
+             | _ -> ref (check_typexpr te env) in
+         mk_type (PointerType t) addr_rep
+[0;32m+[0m[0;1;41m    [0m
+[0;32m+    | OpenArray t1 ->[0m
+[0;32m+      let t2 = check_typexpr t1 env in[0m
+[0;32m+      if (is_openArray t2 || is_array t2) then[0m
+[0;32m+        sem_error "open array can't contain arrays" [];[0m
+[0;32m+      openArrayRow t2[0m
+[0;32m+[0m
+ 
+ (* |check_decl| -- check a declaration and add it to the environment *)
+ and check_decl d env = 
+[0;35m@@ -612,7 +670,9 @@[0m
+       ("asr", operator Asr [integer; integer], integer);
+       ("bitand", operator BitAnd [integer; integer], integer);
+       ("bitor", operator BitOr [integer; integer], integer);
+[0;31m-      ("bitnot", operator BitNot [integer], integer)] empty[0m
+[0;32m+      ("bitnot", operator BitNot [integer], integer);[0m
+[0;32m+      ("len", libproc Len 1 [], integer);[0m
+[0;32m+      ("newrow", libproc NewRowProc 2 [], voidtype)] empty[0m
+ 
+ (* |annotate| -- annotate the whole program *)
+ let annotate (Prog (Block (globals, ss, fsize, nregv), glodefs)) =
+[0;1mdiff -r 6e99c96e0a56 lab4/dict.ml[0m
+[0;31;1m--- a/lab4/dict.ml	Thu Nov 02 18:58:50 2023 +0000[0m
+[0;32;1m+++ b/lab4/dict.ml	Sat Jan 20 21:02:17 2024 +0000[0m
+[0;35m@@ -37,7 +37,7 @@[0m
+ (* |libid| -- type of picoPascal library procedures *)
+ type libid = ChrFun | OrdFun | PrintNum | PrintChar | PrintString 
+   | NewLine | ReadChar | ExitProc | NewProc | ArgcFun | ArgvProc
+[0;31m-  | OpenIn | CloseIn | Operator of Optree.op[0m
+[0;32m+  | OpenIn | CloseIn | Operator of Optree.op | Len | NewRowProc[0m
+ 
+ (* |lib_name| -- name of a library procedure *)
+ let lib_name x = 
+[0;35m@@ -49,6 +49,8 @@[0m
+     | ArgcFun -> "argc" | ArgvProc -> "argv"
+     | OpenIn -> "open_in" | CloseIn -> "close_in"
+     | Operator op -> sprintf "$" [Optree.fOp op]
+[0;32m+    | Len -> "len"[0m
+[0;32m+    | NewRowProc -> "newrow"[0m
+ 
+ (* |fLibId| -- format library name for printing *)
+ let fLibId l = fStr (lib_name l)
+[0;35m@@ -86,6 +88,7 @@[0m
+   | LibDef of libproc           (* Lib proc (data) *)
+   | HoleDef of ptype ref        (* Pending type *)
+   | DummyDef                    (* Dummy *)
+[0;32m+  | OpenArrayParamDef[0m
+ 
+ (* |def| -- definitions in environment *)
+ and def = 
+[0;35m@@ -109,6 +112,7 @@[0m
+ and type_guts =
+     BasicType of basic_type
+   | ArrayType of int * ptype
+[0;32m+  | OpenArrayType of ptype[0m
+   | RecordType of def list
+   | ProcType of proc_data
+   | PointerType of ptype ref
+[0;35m@@ -202,6 +206,9 @@[0m
+   let r = t.t_rep in 
+   mk_type (ArrayType (n, t)) { r_size = n * r.r_size; r_align = r.r_align }
+ 
+[0;32m+let openArrayRow t =[0m[0;1;41m [0m
+[0;32m+  mk_type (OpenArrayType t) addr_rep[0m
+[0;32m+[0m
+ let discrete t =
+   match t.t_guts with
+       BasicType (IntType | CharType | BoolType) -> true
+[0;35m@@ -218,6 +225,16 @@[0m
+       PointerType t1 -> true
+     | _ -> false
+ 
+[0;32m+let is_array t =[0m
+[0;32m+  match t.t_guts with[0m
+[0;32m+    ArrayType (n,t1) -> true[0m
+[0;32m+    | _ -> false[0m
+[0;32m+[0m
+[0;32m+let is_openArray t =[0m
+[0;32m+  match t.t_guts with[0m
+[0;32m+    OpenArrayType t1 -> true[0m
+[0;32m+    | _ -> false[0m
+[0;32m+[0m
+ let bound t =
+   match t.t_guts with
+       ArrayType (n, t1) -> n
+[0;35m@@ -227,8 +244,14 @@[0m
+   match t.t_guts with
+       PointerType t1 -> !t1
+     | ArrayType (n, t1) -> t1
+[0;32m+    | OpenArrayType t1 -> t1[0m
+     | _ -> failwith "base_type"
+ 
+[0;32m+let rec get_final_pointer t =[0m[0;1;41m [0m
+[0;32m+  match t.t_guts with[0m[0;1;41m [0m
+[0;32m+      PointerType t1 -> get_final_pointer !t1[0m
+[0;32m+    | x -> x[0m
+[0;32m+[0m
+ let get_proc t =
+   match t.t_guts with
+       ProcType p -> p
+[0;35m@@ -241,8 +264,16 @@[0m
+         && same_type p1.p_result p2.p_result
+     | (ArrayType (n1, u1), ArrayType(n2, u2)) ->
+         n1 = n2 && same_type u1 u2
+[0;32m+    | (OpenArrayType t1, OpenArrayType t2) -> same_type t1 t2[0m
+[0;32m+    | (OpenArrayType t1, ArrayType(n2, t2)) -> same_type t1 t2[0m
+[0;32m+    | (ArrayType(n1, t1), OpenArrayType t2) ->  same_type t1 t2[0m
+[0;32m+    | (OpenArrayType _, PointerType p) -> same_type t1 !p[0m
+[0;32m+    | (ArrayType(_,_), PointerType p) -> same_type t1 !p[0m
+[0;32m+    | (PointerType p, OpenArrayType _) -> same_type !p t2[0m
+[0;32m+    | (PointerType p, ArrayType(_,_)) -> same_type !p t2[0m
+     | (PointerType _, BasicType x) -> x = AddrType
+     | (BasicType x, PointerType _) -> x = AddrType
+[0;32m+    | (PointerType p, PointerType q) -> same_type !p !q[0m
+     | (_, _) -> t1.t_id = t2.t_id
+ 
+ and match_args fp1 fp2 = 
+[0;35m@@ -256,6 +287,7 @@[0m
+ let is_string t =
+   match t.t_guts with
+       ArrayType (n, t1) -> same_type t1 character
+[0;32m+    | OpenArrayType t1 -> same_type t1 character[0m
+     | _ -> false
+ 
+ let symbol_of d =
+[0;1mdiff -r 6e99c96e0a56 lab4/dict.mli[0m
+[0;31;1m--- a/lab4/dict.mli	Thu Nov 02 18:58:50 2023 +0000[0m
+[0;32;1m+++ b/lab4/dict.mli	Sat Jan 20 21:02:17 2024 +0000[0m
+[0;35m@@ -21,7 +21,7 @@[0m
+ (* |libid| -- type of picoPascal library procedures *)
+ type libid = ChrFun | OrdFun | PrintNum | PrintChar | PrintString 
+   | NewLine | ReadChar | ExitProc | NewProc | ArgcFun | ArgvProc
+[0;31m-  | OpenIn | CloseIn | Operator of Optree.op[0m
+[0;32m+  | OpenIn | CloseIn | Operator of Optree.op | Len | NewRowProc[0m
+ 
+ (* |fLibId| -- format libid for printing *)
+ val fLibId : libid -> Print.arg
+[0;35m@@ -50,6 +50,7 @@[0m
+   | LibDef of libproc           (* Lib proc (data) *)
+   | HoleDef of ptype ref        (* Pending type *)
+   | DummyDef                    (* Dummy *)
+[0;32m+  | OpenArrayParamDef[0m
+ 
+ (* |def| -- definitions in environment *)
+ and def = 
+[0;35m@@ -71,6 +72,7 @@[0m
+ and type_guts =
+     BasicType of basic_type
+   | ArrayType of int * ptype
+[0;32m+  | OpenArrayType of ptype[0m
+   | RecordType of def list
+   | ProcType of proc_data
+   | PointerType of ptype ref
+[0;35m@@ -135,6 +137,9 @@[0m
+ (* |row| -- construct array type *)
+ val row : int -> ptype -> ptype
+ 
+[0;32m+(* construct open array type *)[0m
+[0;32m+val openArrayRow : ptype -> ptype[0m
+[0;32m+[0m
+ (* |mk_type| -- construct new (uniquely labelled) type *)
+ val mk_type : type_guts -> Mach.metrics -> ptype
+ 
+[0;35m@@ -147,12 +152,18 @@[0m
+ (* |is_string| -- test if a type is 'array N of char' *)
+ val is_string : ptype -> bool
+ 
+[0;32m+val get_final_pointer : ptype -> type_guts[0m
+[0;32m+[0m
+ (* |bound| -- get bound of array type *)
+ val bound : ptype -> int
+ 
+ (* |is_pointer| -- test if a type is 'pointer to T' *)
+ val is_pointer : ptype -> bool
+ 
+[0;32m+val is_array : ptype -> bool[0m
+[0;32m+[0m
+[0;32m+val is_openArray  :ptype -> bool[0m
+[0;32m+[0m
+ (* |base_type| -- get base type of pointer or array *)
+ val base_type : ptype -> ptype
+ 
+[0;1mdiff -r 6e99c96e0a56 lab4/optree.ml[0m
+[0;31;1m--- a/lab4/optree.ml	Thu Nov 02 18:58:50 2023 +0000[0m
+[0;32;1m+++ b/lab4/optree.ml	Sat Jan 20 21:02:17 2024 +0000[0m
+[0;35m@@ -61,6 +61,7 @@[0m
+   | BINOP of op                 (* Perform binary operation (op) *)
+   | OFFSET                      (* Add address and offset *)
+   | BOUND                       (* Array bound check *)
+[0;32m+  | SLICE[0m
+   | NCHECK                      (* Null pointer check *)
+   | LABEL of codelab            (* Set code label *)
+   | JUMP of codelab             (* Unconditional branch (dest) *)
+[0;35m@@ -93,6 +94,7 @@[0m
+     | BINOP w ->        fMeta "BINOP $" [fOp w]
+     | OFFSET ->         fStr "OFFSET"
+     | BOUND ->          fStr "BOUND"
+[0;32m+    | SLICE ->           fStr "SLICE"[0m
+     | NCHECK ->         fStr "NCHECK"
+     | LABEL l ->        fMeta "LABEL $" [fLab l]
+     | JUMP l ->         fMeta "JUMP $" [fLab l]
+[0;1mdiff -r 6e99c96e0a56 lab4/optree.mli[0m
+[0;31;1m--- a/lab4/optree.mli	Thu Nov 02 18:58:50 2023 +0000[0m
+[0;32;1m+++ b/lab4/optree.mli	Sat Jan 20 21:02:17 2024 +0000[0m
+[0;35m@@ -50,6 +50,7 @@[0m
+   | BINOP of op                 (* Perform binary operation (op) *)
+   | OFFSET                      (* Add address and offset *)
+   | BOUND                       (* Array bound check *)
+[0;32m+  | SLICE[0m
+   | NCHECK                      (* Null pointer check *)
+   | LABEL of codelab            (* Set code label *)
+   | JUMP of codelab             (* Unconditional branch (dest) *)
+[0;1mdiff -r 6e99c96e0a56 lab4/parser.mly[0m
+[0;31;1m--- a/lab4/parser.mly	Thu Nov 02 18:58:50 2023 +0000[0m
+[0;32;1m+++ b/lab4/parser.mly	Sat Jan 20 21:02:17 2024 +0000[0m
+[0;35m@@ -85,7 +85,9 @@[0m
+   | formal_decl SEMI formal_decls       { $1 :: $3 } ;
+ 
+ formal_decl :   
+[0;31m-    ident_list COLON typexpr            { VarDecl (CParamDef, $1, $3) }[0m
+[0;32m+    ident_list COLON openArray          { VarDecl (OpenArrayParamDef, $1, $3) }[0m
+[0;32m+  | VAR ident_list COLON openArray      { VarDecl (OpenArrayParamDef, $2, $4) }[0m
+[0;32m+  | ident_list COLON typexpr            { VarDecl (CParamDef, $1, $3) }[0m
+   | VAR ident_list COLON typexpr        { VarDecl (VParamDef, $2, $4) }
+   | proc_heading                        { PParamDecl $1 } ;
+ 
+[0;35m@@ -181,14 +183,21 @@[0m
+ 
+ variable :      
+     name                                { make_expr (Variable $1) }
+[0;32m+  | variable SUB expr DOT DOT expr RPAR { make_expr (Slice ($1,$3,$6)) }[0m
+[0;32m+  | variable SUB name DOT DOT expr RPAR { make_expr (Slice ($1,make_expr (Variable $3),$6)) }[0m
+   | variable SUB expr BUS               { make_expr (Sub ($1, $3)) }
+   | variable DOT name                   { make_expr (Select ($1, $3)) }
+   | variable ARROW                      { make_expr (Deref $1) } ;
+ 
+[0;32m+[0m
+[0;32m+openArray :[0m
+[0;32m+  ARRAY OF typexpr                    { OpenArray $3 }[0m
+[0;32m+[0m
+ typexpr :       
+     name                                { TypeName $1 }
+   | ARRAY expr OF typexpr               { Array ($2, $4) }
+   | RECORD fields END                   { Record $2 }
+[0;32m+  | POINTER TO openArray                { Pointer $3 }[0m
+   | POINTER TO typexpr                  { Pointer $3 } ;
+ 
+ fields :
+[0;1mdiff -r 6e99c96e0a56 lab4/pas0.c[0m
+[0;31;1m--- a/lab4/pas0.c	Thu Nov 02 18:58:50 2023 +0000[0m
+[0;32;1m+++ b/lab4/pas0.c	Sat Jan 20 21:02:17 2024 +0000[0m
+[0;35m@@ -70,6 +70,11 @@[0m
+      exit(2);
+ }
+ 
+[0;32m+void slicecheck(int n) {[0m
+[0;32m+     fprintf(stderr, "Slice error on line %d\n", n);[0m
+[0;32m+     exit(2);[0m
+[0;32m+}[0m
+[0;32m+[0m
+ void nullcheck(int n) {
+      fprintf(stderr, "Null pointer check on line %d\n", n);
+      exit(2);
+[0;1mdiff -r 6e99c96e0a56 lab4/tgen.ml[0m
+[0;31;1m--- a/lab4/tgen.ml	Thu Nov 02 18:58:50 2023 +0000[0m
+[0;32;1m+++ b/lab4/tgen.ml	Sat Jan 20 21:02:17 2024 +0000[0m
+[0;35m@@ -12,6 +12,7 @@[0m
+ let optlevel = ref 0
+ let debug = ref 0
+ 
+[0;32m+[0m
+ (* |level| -- nesting level of current procedure *)
+ let level = ref 0
+ 
+[0;35m@@ -46,13 +47,33 @@[0m
+     | Nowhere -> 
+         failwith (sprintf "address $" [fId d.d_tag])
+ 
+[0;32m+(* 3 cases - normal array (size in def), openarray parameter (size at +4) or pointer to open array (size at -4)*)[0m
+[0;32m+let size_of_array e1 =[0m[0;1;41m [0m
+[0;32m+    let deepestExpr = deref_chain e1 in[0m
+[0;32m+    match e1.e_type.t_guts with[0m
+[0;32m+        OpenArrayType t ->[0m[0;1;41m [0m
+[0;32m+                          begin[0m
+[0;32m+                                match deepestExpr.e_guts with[0m
+[0;32m+                                    Variable x ->[0m
+[0;32m+                                                  begin[0m
+[0;32m+                                                        match (get_def x).d_kind with[0m
+[0;32m+                                                            OpenArrayParamDef -> <LOADW, <OFFSET, address (get_def x), <CONST 4>>>[0m
+[0;32m+                                                          | _ -> <LOADW, <OFFSET, <LOADW, address (get_def x)>, <CONST (-4)>>>[0m
+[0;32m+                                                  end[0m
+[0;32m+                                  | _ -> failwith "can't take length of non-variable"[0m
+[0;32m+                          end[0m
+[0;32m+[0m[0;1;41m            [0m
+[0;32m+      | ArrayType(n,t) -> <CONST n>[0m[0;1;41m [0m
+[0;32m+      | _ -> failwith "not a valid array"[0m
+[0;32m+[0m
+[0;32m+[0m
+ (* |gen_closure| -- two trees for a (code, envt) pair *)
+ let gen_closure d =
+   match d.d_kind with
+       ProcDef ->
+         (<GLOBAL (symbol_of d)>,
+           if d.d_level = 0 then <CONST 0> else schain (!level - d.d_level))
+[0;31m-    | PParamDef ->[0m
+[0;32m+    | PParamDef | OpenArrayParamDef->[0m
+         (<LOADW, address d>,
+           <LOADW, <OFFSET, address d, <CONST addr_rep.r_size>>>)
+     | _ -> failwith "missing closure"
+[0;35m@@ -71,8 +92,44 @@[0m
+ let gen_copy dst src n =
+   libcall "memcpy" [dst; src; <CONST n>] voidtype
+ 
+[0;32m+let rec gen_addr_bound a =[0m[0;1;41m [0m
+[0;32m+    let temp = Regs.new_temp() in[0m
+[0;32m+    match get_final_pointer a.e_type with[0m
+[0;32m+        ArrayType(n,t) ->[0m[0;1;41m [0m
+[0;32m+                          let deepestExpr = deref_chain a in[0m[0;1;41m [0m
+[0;32m+                          begin[0m
+[0;32m+                                match deepestExpr.e_guts with[0m
+[0;32m+                                    Variable x ->[0m[0;1;41m [0m
+[0;32m+                                                  let baseAddrTree = <AFTER, <DEFTEMP temp, gen_addr deepestExpr>, <TEMP temp>> in[0m
+[0;32m+                                                  let boundTree = <CONST n> in[0m
+[0;32m+                                                  (baseAddrTree,boundTree)[0m
+[0;32m+                                  | _ -> failwith "non-variable is not suitable for bounds checking!"[0m[0;1;41m [0m
+[0;32m+                          end[0m
+[0;32m+[0m
+[0;32m+      | OpenArrayType t ->[0m[0;1;41m [0m
+[0;32m+                          let deepestExpr = deref_chain a in (*need to determine if it is an open array parameter or if it is the dereference value of some pointer (or chain of pointers)*)[0m
+[0;32m+                          begin[0m
+[0;32m+                              match deepestExpr.e_guts with[0m
+[0;32m+                                  Variable x -> let d = get_def x in[0m
+[0;32m+                                                begin[0m
+[0;32m+                                                      match d.d_kind with[0m
+[0;32m+                                                          OpenArrayParamDef ->[0m[0;1;41m [0m
+[0;32m+                                                                              let addr = address d in[0m
+[0;32m+                                                                              let baseAddrTree = <AFTER, <DEFTEMP temp, addr>, <LOADW, <TEMP temp>>> in[0m
+[0;32m+                                                                              let boundTree = <LOADW, <OFFSET, <TEMP temp>, <CONST 4>>>[0m
+[0;32m+                                                                              in (baseAddrTree,boundTree)[0m
+[0;32m+                                                        |_ -> (* pointer to open array *)[0m
+[0;32m+                                                                              let addr = address d in[0m
+[0;32m+                                                                              let baseAddrTree = <AFTER, <DEFTEMP temp, <LOADW, addr>>, <TEMP temp>> in[0m
+[0;32m+                                                                              let boundTree = <LOADW, <OFFSET, <TEMP temp>, <CONST (-4)>>>[0m
+[0;32m+                                                                              in (baseAddrTree,boundTree)[0m
+[0;32m+                                                end[0m
+[0;32m+                                | _ -> failwith "non-variable is not suitable for bounds checking"[0m
+[0;32m+                          end[0m
+[0;32m+[0m
+[0;32m+[0m
+ (* |gen_addr| -- code for the address of a variable *)
+[0;31m-let rec gen_addr v =[0m[0;1;41m [0m
+[0;32m+and gen_addr v =[0m[0;1;41m [0m
+   match v.e_guts with
+       Variable x ->
+         let d = get_def x in
+[0;35m@@ -89,24 +146,35 @@[0m
+                   <LOADW, address d>
+             | StringDef ->
+                 address d
+[0;32m+            | OpenArrayParamDef ->[0m
+[0;32m+              <LOADW, address d>[0m
+             | _ -> 
+                 failwith "load_addr"
+         end
+     | Sub (a, i) ->
+[0;31m-        let bound_check t =[0m
+[0;31m-          if not !boundchk then t else <BOUND, t, <CONST (bound a.e_type)>> in[0m
+[0;31m-        <OFFSET,[0m[0;1;41m [0m
+[0;31m-          gen_addr a,[0m
+[0;31m-          <BINOP Times, bound_check (gen_expr i), <CONST (size_of v.e_type)>>>[0m
+[0;32m+        begin[0m
+[0;32m+            match a.e_type.t_guts with[0m
+[0;32m+                ArrayType(n,t) ->     if not !boundchk then[0m[0;1;41m [0m
+[0;32m+                                          <OFFSET, gen_addr a, <BINOP Times, gen_expr i, <CONST (size_of v.e_type)>>>[0m
+[0;32m+                                      else[0m[0;1;41m [0m
+[0;32m+                                          let (baseAddrTree,boundTree) = gen_addr_bound a in[0m
+[0;32m+                                          <OFFSET, baseAddrTree, <BINOP Times, <BOUND, gen_expr i, boundTree>, <CONST (size_of v.e_type)>>>[0m
+[0;32m+              | OpenArrayType t ->[0m[0;1;41m  [0m
+[0;32m+                                      if not !boundchk then[0m[0;1;41m [0m
+[0;32m+                                          <OFFSET, gen_addr a, <BINOP Times, gen_expr i, <CONST (size_of v.e_type)>>>[0m
+[0;32m+                                      else[0m
+[0;32m+                                          let (baseAddrTree,boundTree) = gen_addr_bound a in[0m
+[0;32m+                                           <OFFSET, baseAddrTree, <BINOP Times, <BOUND, gen_expr i, boundTree>, <CONST (size_of v.e_type)>>>[0m
+[0;32m+        end[0m[0;1;41m [0m
+     | Select (r, x) ->
+         let d = get_def x in
+         <OFFSET, gen_addr r, <CONST (offset_of d)>>
+     | Deref p ->
+         let null_check t =
+           if not !boundchk then t else <NCHECK, t> in
+[0;31m-        null_check (gen_expr p)[0m
+[0;32m+        null_check (gen_expr (deref_chain p))[0m
+     | String (lab, n) -> <GLOBAL lab>
+[0;31m-    | _ -> failwith "gen_addr"[0m
+[0;32m+    | _ -> failwith "gen_addr!"[0m
+ 
+ (* |gen_expr| -- tree for the value of an expression *)
+ and gen_expr e =
+[0;35m@@ -116,7 +184,7 @@[0m
+     | None -> 
+         begin
+           match e.e_guts with
+[0;31m-              Variable _ | Sub _ | Select _ | Deref _ ->[0m
+[0;32m+              Variable _ | Sub _ | Select _ | Deref _ | Slice _->[0m
+                 let ld = if size_of e.e_type = 1 then LOADC else LOADW in
+                 <ld, gen_addr e>
+             | Monop (w, e1) ->
+[0;35m@@ -162,7 +230,52 @@[0m
+             | _ -> 
+                 failwith "bad funarg"
+         end
+[0;31m-    | _ -> failwith "bad arg"[0m
+[0;32m+    | OpenArrayParamDef ->[0m
+[0;32m+      begin[0m
+[0;32m+        match a.e_guts with[0m
+[0;32m+          Variable x ->[0m
+[0;32m+            let def = get_def x in[0m
+[0;32m+            let kind = def.d_kind in[0m
+[0;32m+            begin[0m[0;1;41m [0m
+[0;32m+[0m[0;1;41m            [0m
+[0;32m+              match kind with[0m
+[0;32m+                OpenArrayParamDef -> let (addr, length) = gen_closure def in [addr;length] (*Only these have *)[0m
+[0;32m+[0m
+[0;32m+                | _ ->[0m[0;1;41m [0m
+[0;32m+[0m[0;1;41m                [0m
+[0;32m+                    begin[0m
+[0;32m+                          match a.e_type.t_guts with (*if it is not an open array parameter, can only be a normal array or a pointer to an (open) array*)[0m
+[0;32m+                              ArrayType(n,t) -> [gen_addr a; <CONST n>][0m
+[0;32m+                            | PointerType p ->[0m[0;1;41m [0m
+[0;32m+                                                let (baseAddrTree,boundTree) = gen_addr_bound (deref_chain a) in[0m
+[0;32m+                                                [baseAddrTree; boundTree][0m
+[0;32m+                            | _ -> failwith "illegal argument"[0m
+[0;32m+                    end[0m[0;1;41m         [0m
+[0;32m+            end[0m
+[0;32m+          | Deref e -> gen_arg f (deref_chain e)[0m
+[0;32m+          | Slice(ar,lb,ub) ->[0m
+[0;32m+              begin[0m
+[0;32m+                    match ar.e_type.t_guts with[0m
+[0;32m+                        ArrayType _ | OpenArrayType _ ->[0m[0;1;41m [0m
+[0;32m+                                              let lbTree = gen_expr lb in[0m
+[0;32m+                                              let ubTree = gen_expr ub in[0m
+[0;32m+                                              let (baseAddrTree,boundTree) = gen_addr_bound ar in (* to avoid repeating side effects *)[0m
+[0;32m+[0m
+[0;32m+                                              if (lb.e_value != None && get_value lb == 0) then (* trivial case *)[0m
+[0;32m+                                                  let arrLength = <SLICE, lbTree, ubTree, boundTree> in[0m
+[0;32m+                                                  [baseAddrTree; arrLength][0m
+[0;32m+                                              else[0m
+[0;32m+                                                  let baseAddr = <OFFSET, baseAddrTree, <BINOP Times, lbTree, <CONST (size_of(base_type ar.e_type))>>> in[0m
+[0;32m+                                                  let arrLength = <SLICE, lbTree, ubTree, boundTree> in[0m[0;1;41m [0m
+[0;32m+                                                  [baseAddr; arrLength][0m
+[0;32m+                    | _ -> failwith "not an array"[0m
+[0;32m+              end[0m
+[0;32m+[0m
+[0;32m+[0m
+[0;32m+[0m
+[0;32m+          | _ -> failwith "bad"[0m
+[0;32m+      end[0m
+[0;32m+    | _ -> failwith "bad arg!"[0m
+ 
+ (* |gen_libcall| -- generate code to call a built-in procedure *)
+ and gen_libcall q args =
+[0;35m@@ -170,13 +283,22 @@[0m
+       (ChrFun, [e]) -> gen_expr e
+     | (OrdFun, [e]) -> gen_expr e
+     | (PrintString, [e]) ->
+[0;31m-        libcall "print_string"[0m
+[0;31m-          [gen_addr e; <CONST (bound e.e_type)>] voidtype[0m
+[0;32m+        begin[0m
+[0;32m+            match e.e_type.t_guts with[0m
+[0;32m+                ArrayType(n,t) ->  libcall "print_string" [gen_addr e; <CONST (bound e.e_type)>] voidtype[0m
+[0;32m+[0m[0;1;41m          [0m
+[0;32m+              | OpenArrayType t -> libcall "print_string" [gen_addr e; size_of_array e] voidtype[0m
+[0;32m+        end[0m
+[0;32m+[0m
+     | (ReadChar, [e]) ->
+         libcall "read_char" [gen_addr e] voidtype
+     | (NewProc, [e]) ->
+         let size = size_of (base_type e.e_type) in
+         <STOREW, libcall "palloc" [<CONST size>] addrtype, gen_addr e>
+[0;32m+    | (NewRowProc, [e1;arrLength]) ->[0m
+[0;32m+        let e1 = deref_chain e1 in[0m[0;1;41m [0m
+[0;32m+        let elemSize = size_of (base_type e1.e_type) in[0m
+[0;32m+        <STOREW, libcall "palloc2" [<CONST (get_value arrLength)>; <CONST elemSize>] addrtype, gen_addr e1>[0m
+     | (ArgcFun, []) ->
+         libcall "argc" [] integer
+     | (ArgvProc, [e1; e2]) ->
+[0;35m@@ -189,6 +311,42 @@[0m
+         <MONOP op, gen_expr e1>
+     | (Operator op, [e1; e2]) ->
+         <BINOP op, gen_expr e1, gen_expr e2>
+[0;32m+    | (Len, [e]) ->     (*different cases for normal array, open array parameter and pointer to (open) array*)[0m
+[0;32m+        size_of_array e[0m
+[0;32m+        (*begin[0m
+[0;32m+            match e.e_guts with[0m
+[0;32m+            Variable x ->[0m[0;1;41m [0m
+[0;32m+                          begin[0m
+[0;32m+                              match e.e_type.t_guts with[0m
+[0;32m+                                ArrayType(n,t) -> <CONST n>[0m
+[0;32m+                                | OpenArrayType t -> <LOADW, <OFFSET, address (get_def x), <CONST 4>>>[0m
+[0;32m+                                | PointerType p ->[0m
+[0;32m+                                                begin[0m
+[0;32m+                                                    match !p.t_guts with[0m
+[0;32m+                                                        ArrayType(n,t) -> <CONST n>[0m
+[0;32m+                                                        | OpenArrayType t -> <LOADW, <OFFSET, <LOADW, (address (get_def x))>, <CONST (-4)>>>[0m
+[0;32m+                                                        | PointerType p ->[0m[0;1;41m  [0m
+[0;32m+                                                                            begin[0m
+[0;32m+                                                                                  match get_final_pointer !p with[0m
+[0;32m+                                                                                      ArrayType(n,t) -> <CONST n>[0m
+[0;32m+                                                                                    |  OpenArrayType t -> <LOADW, <OFFSET, <LOADW, (address (get_def x))>, <CONST (-4)>>>[0m
+[0;32m+                                                                                    | _ -> failwith "not pointing at an array" ;[0m
+[0;32m+                                                                            end[0m
+[0;32m+                                                end[0m
+[0;32m+                                | _ -> failwith "bad arg"[0m
+[0;32m+                          end[0m
+[0;32m+            | Deref e2 ->[0m
+[0;32m+                gen_libcall q [deref_chain e2][0m
+[0;32m+                (*gen_libcall q [e2]*)[0m
+[0;32m+[0m
+[0;32m+            | _ -> failwith "bad arg for len"[0m
+[0;32m+        end*)[0m
+[0;32m+[0m[0;1;41m        [0m
+[0;32m+        (*begin[0m
+[0;32m+          match e.e_type.t_guts with[0m
+[0;32m+            ArrayType(n,t) -> <CONST n>[0m
+[0;32m+            | OpenArrayType t -> <LOADW, <OFFSET, gen_addr e, <CONST 4>>>[0m
+[0;32m+        end*)[0m
+     | (_, _) ->
+         let proc = sprintf "$" [fLibId q.q_id] in
+         libcall proc (List.map gen_expr args) voidtype
+[0;1mdiff -r 6e99c96e0a56 lab4/tran.ml[0m
+[0;31;1m--- a/lab4/tran.ml	Thu Nov 02 18:58:50 2023 +0000[0m
+[0;32;1m+++ b/lab4/tran.ml	Sat Jan 20 21:02:17 2024 +0000[0m
+[0;35m@@ -152,6 +152,13 @@[0m
+         gen_reg "cmp $1, $2 / ldrhs r0, =$3 / blhs check"
+           (reg_of v1) [v1; v2; number !line]
+ 
+[0;32m+    | <SLICE, i, j, n> ->[0m
+[0;32m+        let v1 = eval_reg i r in[0m
+[0;32m+        let v2 = eval_reg j R_any in[0m
+[0;32m+        let v3 = eval_reg n R_any in[0m
+[0;32m+        gen_reg "sub $1, $2, $1 / cmp $1, #0 / ldrmi r0, =$4 / blmi slicecheck / cmp $3, $2 / ldrmi r0, =$4 / blmi slicecheck"[0m
+[0;32m+          (reg_of v1) [v1; v2; v3; number !line][0m
+[0;32m+[0m
+     | <NCHECK, t1> ->
+         let v1 = eval_reg t1 r in
+         gen_reg "cmp $1, #0 / ldreq r0, =$2 / bleq nullcheck"
+[0;1mdiff -r 6e99c96e0a56 lab4/tree.ml[0m
+[0;31;1m--- a/lab4/tree.ml	Thu Nov 02 18:58:50 2023 +0000[0m
+[0;32;1m+++ b/lab4/tree.ml	Sat Jan 20 21:02:17 2024 +0000[0m
+[0;35m@@ -49,6 +49,7 @@[0m
+ and expr_guts =
+     Constant of int * ptype
+   | Variable of name
+[0;32m+  | Slice of expr * expr * expr[0m
+   | Sub of expr * expr 
+   | Select of expr * name
+   | Deref of expr
+[0;35m@@ -61,9 +62,15 @@[0m
+ and typexpr = 
+     TypeName of name 
+   | Array of expr * typexpr
+[0;32m+  | OpenArray of typexpr[0m
+   | Record of decl list
+   | Pointer of typexpr
+ 
+[0;32m+let rec deref_chain e =[0m
+[0;32m+    match e.e_guts with[0m
+[0;32m+      Deref e2 -> deref_chain e2[0m
+[0;32m+    | _ -> e[0m
+[0;32m+[0m
+ (* |make_expr| -- construct an expression node with dummy annotations *)
+ let make_expr e = 
+   { e_guts = e; e_type = voidtype; e_value = None }
+[0;35m@@ -156,6 +163,7 @@[0m
+   match e.e_guts with
+       Constant (n, t) -> fMeta "(CONST $)" [fNum n]
+     | Variable x -> fName x
+[0;32m+    | Slice (e1,e2,e3) -> fMeta "(SLICE $ $ $)" [fExpr e1; fExpr e2; fExpr e3][0m
+     | Sub (e1, e2) -> fMeta "(SUB $ $)" [fExpr e1; fExpr e2]
+     | Select (e1, x) -> fMeta "(SELECT $ $)" [fExpr e1; fName x]
+     | Deref e1 -> fMeta "(DEREF $)" [fExpr e1]
+[0;35m@@ -172,6 +180,7 @@[0m
+   function
+       TypeName x -> fName x
+     | Array (e, t1) -> fMeta "(ARRAY $ $)" [fExpr e; fType t1]
+[0;32m+    | OpenArray t1 -> fMeta "(OPENARRAY $)" [fType t1][0m
+     | Record fields -> fMeta "(RECORD$)" [fTail(fDecl) fields]
+     | Pointer t1 -> fMeta "(POINTER $)" [fType t1]
+ 
+[0;1mdiff -r 6e99c96e0a56 lab4/tree.mli[0m
+[0;31;1m--- a/lab4/tree.mli	Thu Nov 02 18:58:50 2023 +0000[0m
+[0;32;1m+++ b/lab4/tree.mli	Sat Jan 20 21:02:17 2024 +0000[0m
+[0;35m@@ -64,6 +64,7 @@[0m
+ and expr_guts =
+     Constant of int * ptype
+   | Variable of name
+[0;32m+  | Slice of expr * expr * expr[0m
+   | Sub of expr * expr 
+   | Select of expr * name
+   | Deref of expr
+[0;35m@@ -76,9 +77,12 @@[0m
+ and typexpr = 
+     TypeName of name 
+   | Array of expr * typexpr
+[0;32m+  | OpenArray of typexpr[0m
+   | Record of decl list
+   | Pointer of typexpr
+ 
+[0;32m+val deref_chain : expr -> expr[0m[0;1;41m [0m
+[0;32m+[0m
+ (* seq -- neatly join a list of statements into a sequence *)
+ val seq : stmt list -> stmt
+ 
