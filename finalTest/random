@@ -1,0 +1,280 @@
+@ Abstract syntax tree:
+@ (PROGRAM
+@   (BLOCK
+@     (DECLS
+@       (VAR (a) (ARRAY (CONST 3) (POINTER integer)))
+@       (PROC
+@         (p () integer)
+@         (BLOCK
+@           (SEQ
+@             (ASSIGN (SUB a (CONST 0)) (SUB a (CONST 1)))
+@             (RETURN (CONST 1)))))
+@       (PROC
+@         (f ((PARAM (b) (ARRAY (CONST 3) (POINTER integer)))) VOID)
+@         (BLOCK
+@           (SEQ
+@             (CALL print_num (DEREF (SUB b (CONST 0))))
+@             (CALL newline)
+@             (SKIP)))))
+@     (SEQ
+@       (CALL new (SUB a (CONST 0)))
+@       (ASSIGN (DEREF (SUB a (CONST 0))) (CONST 10))
+@       (CALL print_num (DEREF (SUB a (CONST 0))))
+@       (CALL newline)
+@       (CALL f a)
+@       (SKIP))))
+
+@ picoPascal compiler output
+	.global pmain
+
+@ proc p(): integer ;
+@ Initial code:
+@     a[0] := a[1];
+@ <STOREW,
+@   <LOADW, <OFFSET, <GLOBAL _a>, <BINOP Times, <CONST 1>, <CONST 4>>>>,
+@   <OFFSET, <GLOBAL _a>, <BINOP Times, <CONST 0>, <CONST 4>>>>
+@     return 1
+@ <RESULTW, <CONST 1>>
+@ <JUMP .L1>
+@ <LABEL .L1>
+
+@ After unnesting:
+@     a[0] := a[1];
+@ <STOREW,
+@   <LOADW, <OFFSET, <GLOBAL _a>, <BINOP Times, <CONST 1>, <CONST 4>>>>,
+@   <OFFSET, <GLOBAL _a>, <BINOP Times, <CONST 0>, <CONST 4>>>>
+@     return 1
+@ <RESULTW, <CONST 1>>
+@ <JUMP .L1>
+@ <LABEL .L1>
+
+	.text
+_p:
+	mov ip, sp
+	stmfd sp!, {r4-r10, fp, ip, lr}
+	mov fp, sp
+@ a[0] := a[1];
+@ <STOREW,
+@   <LOADW, <OFFSET, <GLOBAL _a>, <BINOP Times, <CONST 1>, <CONST 4>>>>,
+@   <OFFSET, <GLOBAL _a>, <BINOP Times, <CONST 0>, <CONST 4>>>>
+	ldr r0, =_a
+	mov r1, #1
+	mov r2, #4
+	mul r1, r1, r2
+	add r0, r0, r1
+	ldr r0, [r0]
+	ldr r1, =_a
+	mov r2, #0
+	mov r3, #4
+	mul r2, r2, r3
+	add r1, r1, r2
+	str r0, [r1]
+@ 
+@ return 1
+@ <RESULTW, <CONST 1>>
+	mov r0, #1
+@ 
+@ <JUMP .L1>
+	b .L1
+@ 
+@ <LABEL .L1>
+.L1:
+@ 
+	ldmfd fp, {r4-r10, fp, sp, pc}
+	.pool
+
+@ proc f(b: array 3 of pointer to integer);
+@ Initial code:
+@     print_num(b[0]^);
+@ <CALL
+@   1,
+@   <GLOBAL print_num>,
+@   <ARG
+@     0,
+@     <LOADW,
+@       <LOADW,
+@         <OFFSET,
+@           <LOADW, <OFFSET, <LOCAL 0>, <CONST 40>>>,
+@           <BINOP Times, <CONST 0>, <CONST 4>>>>>>>
+@     newline();
+@ <CALL 0, <GLOBAL newline>>
+@ end;
+@ <LABEL .L2>
+
+@ After unnesting:
+@     print_num(b[0]^);
+@ <CALL
+@   1,
+@   <GLOBAL print_num>,
+@   <ARG
+@     0,
+@     <LOADW,
+@       <LOADW,
+@         <OFFSET,
+@           <LOADW, <OFFSET, <LOCAL 0>, <CONST 40>>>,
+@           <BINOP Times, <CONST 0>, <CONST 4>>>>>>>
+@     newline();
+@ <CALL 0, <GLOBAL newline>>
+@ end;
+@ <LABEL .L2>
+
+_f:
+	mov ip, sp
+	stmfd sp!, {r0-r1}
+	stmfd sp!, {r4-r10, fp, ip, lr}
+	mov fp, sp
+@ print_num(b[0]^);
+@ <ARG
+@   0,
+@   <LOADW,
+@     <LOADW,
+@       <OFFSET,
+@         <LOADW, <OFFSET, <LOCAL 0>, <CONST 40>>>,
+@         <BINOP Times, <CONST 0>, <CONST 4>>>>>>
+	ldr r0, [fp, #40]
+	mov r1, #0
+	mov r2, #4
+	mul r1, r1, r2
+	add r0, r0, r1
+	ldr r0, [r0]
+	ldr r0, [r0]
+@ regs r0=1
+@ <CALL 1, <GLOBAL print_num>>
+	bl print_num
+@ 
+@ newline();
+@ <CALL 0, <GLOBAL newline>>
+	bl newline
+@ 
+@ end;
+@ <LABEL .L2>
+.L2:
+@ 
+	ldmfd fp, {r4-r10, fp, sp, pc}
+	.pool
+
+@ Initial code:
+@     new(a[0]);
+@ <STOREW,
+@   <CALL 1, <GLOBAL palloc>, <ARG 0, <CONST 4>>>,
+@   <OFFSET, <GLOBAL _a>, <BINOP Times, <CONST 0>, <CONST 4>>>>
+@     a[0]^ := 10;
+@ <STOREW,
+@   <CONST 10>,
+@   <LOADW, <OFFSET, <GLOBAL _a>, <BINOP Times, <CONST 0>, <CONST 4>>>>>
+@     print_num(a[0]^);
+@ <CALL
+@   1,
+@   <GLOBAL print_num>,
+@   <ARG
+@     0,
+@     <LOADW,
+@       <LOADW,
+@         <OFFSET, <GLOBAL _a>, <BINOP Times, <CONST 0>, <CONST 4>>>>>>>
+@     newline();
+@ <CALL 0, <GLOBAL newline>>
+@     f(a);
+@ <CALL 1, <GLOBAL _f>, <STATLINK, <CONST 0>>, <ARG 0, <GLOBAL _a>>>
+@ end.
+@ <LABEL .L3>
+
+@ After unnesting:
+@     new(a[0]);
+@ <DEFTEMP 1, <CALL 1, <GLOBAL palloc>, <ARG 0, <CONST 4>>>>
+@ <STOREW,
+@   <TEMP 1>,
+@   <OFFSET, <GLOBAL _a>, <BINOP Times, <CONST 0>, <CONST 4>>>>
+@     a[0]^ := 10;
+@ <STOREW,
+@   <CONST 10>,
+@   <LOADW, <OFFSET, <GLOBAL _a>, <BINOP Times, <CONST 0>, <CONST 4>>>>>
+@     print_num(a[0]^);
+@ <CALL
+@   1,
+@   <GLOBAL print_num>,
+@   <ARG
+@     0,
+@     <LOADW,
+@       <LOADW,
+@         <OFFSET, <GLOBAL _a>, <BINOP Times, <CONST 0>, <CONST 4>>>>>>>
+@     newline();
+@ <CALL 0, <GLOBAL newline>>
+@     f(a);
+@ <CALL 1, <GLOBAL _f>, <STATLINK, <CONST 0>>, <ARG 0, <GLOBAL _a>>>
+@ end.
+@ <LABEL .L3>
+
+pmain:
+	mov ip, sp
+	stmfd sp!, {r4-r10, fp, ip, lr}
+	mov fp, sp
+@ new(a[0]);
+@ <ARG 0, <CONST 4>>
+	mov r0, #4
+@ regs r0=1
+@ <DEFTEMP 1, <CALL 1, <GLOBAL palloc>>>
+	bl palloc
+@ regs r0=1
+@ <STOREW,
+@   <TEMP 1>,
+@   <OFFSET, <GLOBAL _a>, <BINOP Times, <CONST 0>, <CONST 4>>>>
+	ldr r1, =_a
+	mov r2, #0
+	mov r3, #4
+	mul r2, r2, r3
+	add r1, r1, r2
+	str r0, [r1]
+@ 
+@ a[0]^ := 10;
+@ <STOREW,
+@   <CONST 10>,
+@   <LOADW, <OFFSET, <GLOBAL _a>, <BINOP Times, <CONST 0>, <CONST 4>>>>>
+	mov r0, #10
+	ldr r1, =_a
+	mov r2, #0
+	mov r3, #4
+	mul r2, r2, r3
+	add r1, r1, r2
+	ldr r1, [r1]
+	str r0, [r1]
+@ 
+@ print_num(a[0]^);
+@ <ARG
+@   0,
+@   <LOADW,
+@     <LOADW, <OFFSET, <GLOBAL _a>, <BINOP Times, <CONST 0>, <CONST 4>>>>>>
+	ldr r0, =_a
+	mov r1, #0
+	mov r2, #4
+	mul r1, r1, r2
+	add r0, r0, r1
+	ldr r0, [r0]
+	ldr r0, [r0]
+@ regs r0=1
+@ <CALL 1, <GLOBAL print_num>>
+	bl print_num
+@ 
+@ newline();
+@ <CALL 0, <GLOBAL newline>>
+	bl newline
+@ 
+@ f(a);
+@ <ARG 0, <GLOBAL _a>>
+	ldr r0, =_a
+@ regs r0=1
+@ <STATLINK, <CONST 0>>
+	mov r10, #0
+@ regs r0=1 r10=1
+@ <CALL 1, <GLOBAL _f>>
+	bl _f
+@ 
+@ end.
+@ <LABEL .L3>
+.L3:
+@ 
+	ldmfd fp, {r4-r10, fp, sp, pc}
+	.pool
+
+	.comm _a, 12, 4
+	.section .note.GNU-stack
+@ End

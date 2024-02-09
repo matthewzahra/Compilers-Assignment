@@ -1,0 +1,92 @@
+(* Negation of booleans and integers *)
+
+var x, y: boolean;
+var u, v: integer;
+
+begin
+  x := true;
+  y := not x;
+  y := not y;
+  if x = y then
+    print_string("OK"); newline()
+  end;
+
+  u := 37;
+  v := -u;
+  v := -v;
+  if u = v then
+    print_string("OK2"); newline()
+  end
+end.
+
+(*<<
+OK
+OK2
+>>*)
+
+(*[[
+@ picoPascal compiler output
+	.global pmain
+
+	.text
+pmain:
+	mov ip, sp
+	stmfd sp!, {r4-r10, fp, ip, lr}
+	mov fp, sp
+@ x := true;
+	mov r4, #1
+	ldr r0, =_x
+	strb r4, [r0]
+@ y := not x;
+	eor r5, r4, #1
+	ldr r6, =_y
+	strb r5, [r6]
+@ y := not y;
+	eor r5, r5, #1
+	strb r5, [r6]
+@ if x = y then
+	cmp r4, r5
+	bne .L4
+@ print_string("OK"); newline()
+	mov r1, #3
+	ldr r0, =__s1
+	bl print_string
+	bl newline
+.L4:
+@ u := 37;
+	mov r4, #37
+	ldr r0, =_u
+	str r4, [r0]
+@ v := -u;
+	neg r5, r4
+	ldr r6, =_v
+	str r5, [r6]
+@ v := -v;
+	neg r5, r5
+	str r5, [r6]
+@ if u = v then
+	cmp r4, r5
+	bne .L1
+@ print_string("OK2"); newline()
+	mov r1, #4
+	ldr r0, =__s2
+	bl print_string
+	bl newline
+.L1:
+	ldmfd fp, {r4-r10, fp, sp, pc}
+	.pool
+
+	.comm _x, 1, 4
+	.comm _y, 1, 4
+	.comm _u, 4, 4
+	.comm _v, 4, 4
+	.data
+__s1:
+	.byte 79, 75
+	.byte 0
+__s2:
+	.byte 79, 75, 50
+	.byte 0
+	.section .note.GNU-stack
+@ End
+]]*)
