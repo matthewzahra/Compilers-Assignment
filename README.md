@@ -1,3 +1,5 @@
+# Pascal Compiler extension to allow formal parameters to be arrays of arbitrary size.
+
 This is my final submission for the 2024 compilers assignment - the PDF "Matthew_Zahra_Compilers_Assignment.pdf" details the work that I completed.
 
 The compiler is written in OCaml and is for a version of Pascal. 
